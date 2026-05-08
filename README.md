@@ -1,8 +1,14 @@
-# OverlayRec
+## OverlayRec
 
-![OverlayRec logo](OverlayRec_logo.png)
+<p align="center">
+  <img src="OverlayRec_logo.png" alt="OverlayRec logo" width="220" />
+</p>
 
-OverlayRec is a lightweight Rokid Glasses utility for triggering AR screenshots and AR video recording without opening the Hi Rokid app first.
+<p align="center">
+  Trigger AR screenshots and AR video recording directly from Rokid glasses, without opening the Hi Rokid app first.
+</p>
+
+---
 
 It runs directly on the glasses as an Android Accessibility Service and listens for a gesture combo:
 
@@ -19,9 +25,16 @@ Press OK to confirm immediately, or wait 5 seconds for auto-confirm.
 
 ## Screenshots
 
-![OverlayRec main screen](OverlayRec-screenshot1.jpg)
+<p align="center">
+  <img src="OverlayRec-screenshot1.jpg" alt="OverlayRec main screen" width="280" />
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="OverlayRec-screenshot2.jpg" alt="OverlayRec overlay menu" width="280" />
+</p>
+<p align="center">
+  <em>Main app &middot; On-glass overlay menu</em>
+</p>
 
-![OverlayRec overlay menu](OverlayRec-screenshot2.jpg)
+---
 
 ## Features
 
