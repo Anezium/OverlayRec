@@ -104,3 +104,7 @@ You can also open the app and use the `Enable Accessibility` button.
 OverlayRec is experimental and built specifically for Rokid Glasses firmware that exposes the two-finger swipe actions above.
 
 The app does not merge camera and HUD videos itself. Rokid's own AR Record flow creates the media, and Hi Rokid handles import/processing.
+
+## License
+
+OverlayRec is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE).
