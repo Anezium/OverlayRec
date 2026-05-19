@@ -8,6 +8,12 @@
   Trigger AR screenshots and AR video recording directly from Rokid glasses, without opening the Hi Rokid app first.
 </p>
 
+<p align="center">
+  <a href="https://ko-fi.com/M8R61ZTXMI" target="_blank">
+    <img height="36" style="border:0px;height:36px;" src="https://storage.ko-fi.com/cdn/kofi4.png?v=6" border="0" alt="Buy Me a Coffee at ko-fi.com" />
+  </a>
+</p>
+
 ---
 
 It runs directly on the glasses as an Android Accessibility Service and listens for a gesture combo:
