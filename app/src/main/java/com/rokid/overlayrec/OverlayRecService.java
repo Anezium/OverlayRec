@@ -13,6 +13,7 @@ import android.os.Looper;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityNodeInfo;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,16 +28,19 @@ public class OverlayRecService extends AccessibilityService {
 
     private static final long COMMAND_TIMEOUT_MS = 2200L;
     private static final long LAUNCH_DELAY_MS = 350L;
+    private static final long MODAL_INPUT_GUARD_MS = 700L;
 
     private enum Direction { LEFT, RIGHT }
-    enum Action { SCREENSHOT, RECORD }
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final List<Direction> inputBuffer = new ArrayList<>();
+    private final RokidKeyNavigation modalNavigation = new RokidKeyNavigation();
     private long lastInputAt = 0L;
     private AudioManager audioManager;
     private VolumeSnapshot commandVolume;
     private OverlayMenu overlayMenu;
+    private boolean hudRecording = false;
+    private long modalInputGuardUntil = 0L;
 
     private final BroadcastReceiver twoFingerReceiver = new BroadcastReceiver() {
         @Override
@@ -46,6 +50,22 @@ public class OverlayRecService extends AccessibilityService {
                 onTwoFinger(Direction.LEFT);
             } else if (ACTION_TWO_FINGER_SWIPE_FORWARD.equals(action)) {
                 onTwoFinger(Direction.RIGHT);
+            }
+        }
+    };
+
+    private final BroadcastReceiver screenRecordStateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if (RokidScreenRecordCommands.ACTION_SCREENRECORD_START.equals(action)) {
+                hudRecording = true;
+                overlayMenu.setHudRecording(true);
+                Log.i(TAG, "HUD screen record started");
+            } else if (RokidScreenRecordCommands.ACTION_SCREENRECORD_STOP.equals(action)) {
+                hudRecording = false;
+                overlayMenu.setHudRecording(false);
+                Log.i(TAG, "HUD screen record stopped");
             }
         }
     };
@@ -61,7 +81,7 @@ public class OverlayRecService extends AccessibilityService {
             }
 
             @Override
-            public void onActionChosen(Action action) {
+            public void onActionChosen(OverlayAction action) {
                 runAction(action);
             }
 
@@ -74,10 +94,15 @@ public class OverlayRecService extends AccessibilityService {
         IntentFilter filter = new IntentFilter();
         filter.addAction(ACTION_TWO_FINGER_SWIPE_BACK);
         filter.addAction(ACTION_TWO_FINGER_SWIPE_FORWARD);
+        IntentFilter screenRecordFilter = new IntentFilter();
+        screenRecordFilter.addAction(RokidScreenRecordCommands.ACTION_SCREENRECORD_START);
+        screenRecordFilter.addAction(RokidScreenRecordCommands.ACTION_SCREENRECORD_STOP);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(twoFingerReceiver, filter, Context.RECEIVER_EXPORTED);
+            registerReceiver(screenRecordStateReceiver, screenRecordFilter, Context.RECEIVER_EXPORTED);
         } else {
             registerReceiver(twoFingerReceiver, filter);
+            registerReceiver(screenRecordStateReceiver, screenRecordFilter);
         }
         Log.i(TAG, "Created and registered two-finger receiver");
     }
@@ -101,6 +126,10 @@ public class OverlayRecService extends AccessibilityService {
             unregisterReceiver(twoFingerReceiver);
         } catch (Exception ignored) {
         }
+        try {
+            unregisterReceiver(screenRecordStateReceiver);
+        } catch (Exception ignored) {
+        }
         super.onDestroy();
     }
 
@@ -115,48 +144,66 @@ public class OverlayRecService extends AccessibilityService {
 
     @Override
     protected boolean onKeyEvent(KeyEvent event) {
-        if (event.getAction() != KeyEvent.ACTION_DOWN || event.getRepeatCount() > 0) {
+        int keyCode = event.getKeyCode();
+        int action = event.getAction();
+
+        if (action != KeyEvent.ACTION_DOWN && action != KeyEvent.ACTION_UP) {
+            return overlayMenu.isShowing() || isModalInputGuardActive();
+        }
+
+        if (overlayMenu.isShowing()) {
+            if (action == KeyEvent.ACTION_UP) {
+                return true;
+            }
+            if (event.getRepeatCount() > 0) {
+                return true;
+            }
+
+            if (keyCode == KeyEvent.KEYCODE_NOTIFICATION) {
+                restoreCommandVolumeSoon();
+                return true;
+            }
+            return modalNavigation.dispatch(event, new RokidKeyNavigation.Listener() {
+                @Override
+                public void onNext() {
+                    overlayMenu.moveSelection(1);
+                    restoreCommandVolumeSoon();
+                }
+
+                @Override
+                public void onPrevious() {
+                    overlayMenu.moveSelection(-1);
+                    restoreCommandVolumeSoon();
+                }
+
+                @Override
+                public void onConfirm() {
+                    overlayMenu.confirmNow();
+                }
+
+                @Override
+                public void onBack() {
+                    startModalInputGuard();
+                    overlayMenu.hide();
+                }
+            }) || true;
+        }
+
+        if (isOverlayRecForeground()) {
             return false;
         }
 
-        int keyCode = event.getKeyCode();
-        Log.i(TAG, "key=" + KeyEvent.keyCodeToString(keyCode) + " code=" + keyCode);
-
-        if (overlayMenu.isShowing()) {
-            if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER
-                    || keyCode == KeyEvent.KEYCODE_ENTER
-                    || keyCode == KeyEvent.KEYCODE_BUTTON_A) {
-                overlayMenu.confirmNow();
-                return true;
-            }
-            if (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                overlayMenu.hide();
-                return true;
-            }
-        }
-
-        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-            return handleDirectionalFallback(Direction.LEFT);
-        }
-        if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-            return handleDirectionalFallback(Direction.RIGHT);
-        }
-        return false;
-    }
-
-    private boolean handleDirectionalFallback(Direction direction) {
-        boolean matched = addToCommandBuffer(direction);
-        if (matched) {
-            showMenu();
+        if (isModalInputGuardActive()) {
             return true;
         }
+
         return false;
     }
 
     private void onTwoFinger(Direction direction) {
         Log.i(TAG, "two-finger " + direction);
         if (overlayMenu.isShowing()) {
-            overlayMenu.select(direction == Direction.LEFT ? Action.SCREENSHOT : Action.RECORD);
+            overlayMenu.moveSelection(direction == Direction.LEFT ? -1 : 1);
             restoreCommandVolumeSoon();
             return;
         }
@@ -193,21 +240,44 @@ public class OverlayRecService extends AccessibilityService {
     private void showMenu() {
         Log.i(TAG, "combo matched, showing menu");
         inputBuffer.clear();
+        startModalInputGuard();
         restoreCommandVolumeSoon();
         overlayMenu.show();
     }
 
-    private void runAction(Action action) {
+    private void runAction(OverlayAction action) {
         Log.i(TAG, "running action " + action);
+        startModalInputGuard();
         overlayMenu.hide();
         restoreCommandVolumeSoon();
         handler.postDelayed(() -> {
-            if (action == Action.SCREENSHOT) {
+            if (action == OverlayAction.SCREENSHOT) {
                 RokidArCommands.startArScreenshot(this);
-            } else {
+            } else if (action == OverlayAction.RECORD) {
                 RokidArCommands.startArRecord(this);
+            } else if (hudRecording) {
+                RokidScreenRecordCommands.stopHudRecord(this);
+            } else {
+                RokidScreenRecordCommands.startHudRecord(this);
             }
         }, LAUNCH_DELAY_MS);
+    }
+
+    private boolean isModalInputGuardActive() {
+        return System.currentTimeMillis() < modalInputGuardUntil;
+    }
+
+    private void startModalInputGuard() {
+        modalInputGuardUntil = System.currentTimeMillis() + MODAL_INPUT_GUARD_MS;
+    }
+
+    private boolean isOverlayRecForeground() {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) {
+            return false;
+        }
+        CharSequence packageName = root.getPackageName();
+        return packageName != null && getPackageName().contentEquals(packageName);
     }
 
     private void restoreCommandVolumeSoon() {

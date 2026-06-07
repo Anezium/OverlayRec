@@ -18,7 +18,7 @@ final class OverlayMenu {
 
     interface Listener {
         void onSelectionChanged();
-        void onActionChosen(OverlayRecService.Action action);
+        void onActionChosen(OverlayAction action);
         void onDismissed();
     }
 
@@ -31,8 +31,9 @@ final class OverlayMenu {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final MenuView view;
 
-    private OverlayRecService.Action selectedAction = OverlayRecService.Action.SCREENSHOT;
+    private OverlayAction selectedAction = OverlayAction.SCREENSHOT;
     private boolean showing = false;
+    private boolean hudRecording = false;
     private long shownAt = 0L;
 
     private final Runnable tick = new Runnable() {
@@ -63,8 +64,9 @@ final class OverlayMenu {
 
     void show() {
         Log.i(TAG, "show");
-        selectedAction = OverlayRecService.Action.SCREENSHOT;
+        selectedAction = OverlayAction.SCREENSHOT;
         view.setSelectedAction(selectedAction);
+        view.setHudRecording(hudRecording);
         view.setProgress(0f);
         shownAt = System.currentTimeMillis();
 
@@ -98,7 +100,7 @@ final class OverlayMenu {
         listener.onDismissed();
     }
 
-    void select(OverlayRecService.Action action) {
+    void select(OverlayAction action) {
         if (!showing || selectedAction == action) return;
         Log.i(TAG, "select " + action);
         selectedAction = action;
@@ -108,25 +110,52 @@ final class OverlayMenu {
         listener.onSelectionChanged();
     }
 
+    void moveSelection(int delta) {
+        OverlayAction[] actions = OverlayAction.values();
+        int index = 0;
+        for (int i = 0; i < actions.length; i++) {
+            if (actions[i] == selectedAction) {
+                index = i;
+                break;
+            }
+        }
+        int next = (index + delta) % actions.length;
+        if (next < 0) {
+            next += actions.length;
+        }
+        select(actions[next]);
+    }
+
+    void setHudRecording(boolean recording) {
+        hudRecording = recording;
+        view.setHudRecording(recording);
+    }
+
     void confirmNow() {
         if (!showing) return;
         Log.i(TAG, "confirm " + selectedAction);
-        OverlayRecService.Action action = selectedAction;
+        OverlayAction action = selectedAction;
         listener.onActionChosen(action);
     }
 
     private static final class MenuView extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
-        private OverlayRecService.Action selectedAction = OverlayRecService.Action.SCREENSHOT;
+        private OverlayAction selectedAction = OverlayAction.SCREENSHOT;
+        private boolean hudRecording = false;
         private float progress = 0f;
 
         MenuView(Context context) {
             super(context);
         }
 
-        void setSelectedAction(OverlayRecService.Action action) {
+        void setSelectedAction(OverlayAction action) {
             selectedAction = action;
+            invalidate();
+        }
+
+        void setHudRecording(boolean recording) {
+            hudRecording = recording;
             invalidate();
         }
 
@@ -142,7 +171,7 @@ final class OverlayMenu {
             int h = getHeight();
             float density = getResources().getDisplayMetrics().density;
             float panelW = Math.min(w - 32f * density, 390f * density);
-            float panelH = 190f * density;
+            float panelH = Math.min(h - 32f * density, 292f * density);
             float left = (w - panelW) / 2f;
             float top = (h - panelH) / 2f;
 
@@ -161,20 +190,30 @@ final class OverlayMenu {
             paint.setFakeBoldText(true);
             canvas.drawText("OverlayRec", w / 2f, top + 44f * density, paint);
 
-            float optionTop = top + 74f * density;
-            float optionH = 62f * density;
-            float gap = 12f * density;
-            float optionW = (panelW - 42f * density) / 2f;
+            float optionTop = top + 70f * density;
+            float optionH = 48f * density;
+            float gap = 8f * density;
+            float optionW = panelW - 30f * density;
             drawOption(canvas, left + 15f * density, optionTop, optionW, optionH,
-                    "AR Screenshot", selectedAction == OverlayRecService.Action.SCREENSHOT, density);
-            drawOption(canvas, left + 15f * density + optionW + gap, optionTop, optionW, optionH,
-                    "AR Record", selectedAction == OverlayRecService.Action.RECORD, density);
+                    OverlayAction.SCREENSHOT.label(hudRecording),
+                    selectedAction == OverlayAction.SCREENSHOT,
+                    density);
+            drawOption(canvas, left + 15f * density, optionTop + optionH + gap, optionW, optionH,
+                    OverlayAction.RECORD.label(hudRecording),
+                    selectedAction == OverlayAction.RECORD,
+                    density);
+            drawOption(canvas, left + 15f * density, optionTop + (optionH + gap) * 2f,
+                    optionW,
+                    optionH,
+                    OverlayAction.HUD_RECORD.label(hudRecording),
+                    selectedAction == OverlayAction.HUD_RECORD,
+                    density);
 
             paint.setFakeBoldText(false);
             paint.setTextSize(13f * density);
             paint.setColor(Color.rgb(188, 198, 208));
-            canvas.drawText("OK auto-confirms in 5s", w / 2f,
-                    top + panelH - 20f * density, paint);
+            canvas.drawText("Swipe selects, OK confirms in 5s", w / 2f,
+                    top + panelH - 22f * density, paint);
 
             paint.setColor(Color.rgb(53, 215, 166));
             rect.set(left, top + panelH - 6f * density,
